@@ -56,9 +56,100 @@ HELP =
 		for i in m do l += i + "\n"
 		return l
 	)
+	
+	struct jsonClass (
+		out = #(),
+		
+		fn init = (
+			out = #()
+		),
+		
+		fn put param value = (
+			append out #(param, value)
+		),
+		
+		fn writeFile f t =
+		(
+			local tmp
+			try(tmp = createFile f) catch (return false)			
+			format t to:tmp
+			flush tmp
+			close tmp
+					
+			return true
+		),
+		
+		fn convertFileToUTF8 o n  =
+		(
+			f = openFile o
+			buffer = #()
+			while (not eof f) do
+			(
+				szLine = readline f		
+				szLine = trimRight (trimLeft szLine)		
+				append buffer szLine
+			)
+			flush f
+			close f	
+			
+			deleteFile o
+			
+			s = dotNetObject "System.IO.StreamWriter" (n) true ((dotNetClass "System.Text.Encoding").GetEncoding("UTF-8"))
+			
+			for l in buffer where  l.count > 0 do s.WriteLine(dotNetObject "System.String" l)			
+			s.Close()		
+		),
+		
+		fn isNumeric s = (
+			s = trimRight s "1234567890."
+			if(s.count > 0) do return false
+			return true
+		),
+		
+		fn q s = (
+			s = s as string
+			bad = #("'", "\"", "\\", "&", "^")			
+			for i in bad do s = substituteString s i ""			
+			
+			
+			if(s == "true" or s == "false") do return s
+			if(isNumeric s) do return s
+			return "\"" + s + "\""
+		),
+				
+		fn v s = (
+			if(classOf s == array) do (
+				o = "[\n"
+				for i in s do (
+					o += "\t\t" + (q i)
+					if(i != s[s.count]) do o += ","
+					o += "\n"
+				)
+				o += "\t]"
+				
+				return o
+			)
+			
+			return q s
+		),
+		
+		fn write f = (
+			j = "{\n"
+			
+				for i in out do (
+					sep = ", "
+					if(i == out[out.count]) do sep = ""
+										
+					j += "\t" + (q i[1]) + ": " + (v i[2]) + sep + "\n"
+				)
+			
+			j += "}\n"
+				
+			writeFile f j
+		)
+	)
 
-	struct zip
-	(
+	struct zip (
 		dirs = #(),
 		files = #(),
 		
@@ -320,9 +411,17 @@ HELP =
 		)
 		
 		
-		
-		
-		
+		fn getInitalView = (					
+			i = ddlInitialView.selection 
+			c = cameras[i]
+			if(c == undefined) do (
+				if(c.count > 0) do return c[1].name
+				return undefined
+			)
+			
+			return c.name
+		)
+				
 		fn openCubeMap = (
 			f = getOpenFileName caption:"Choose Image" types:"JPG (*.jpg)|*.jpg"
 			if(f == undefined) do return false
@@ -370,7 +469,7 @@ HELP =
 			return code
 		)
 		
-		fn cubeMapsOptimize path: "" = (
+		fn cubeMapsOptimize path: "" names: #() = (
 			selfPath = getFileNamePath (getThisScriptFileName())
 			jpgoptim = "\"" + selfPath + "jpegoptim.exe\""
 				
@@ -379,13 +478,25 @@ HELP =
 				
 			imgs = ""
 
-			for i in 1 to 6 do imgs += i as string + ".jpg "
+			for i in names do imgs += "\"" + i + "\" "
 						
 			cmd = jpgoptim + " --strip-all -f -o -q --all-progressive -m" + (spnCubeMapsQuality.value as string) + "  " + imgs
 				
 			hiddenDosCommand cmd exitcode:&exitcode	
 				
 			sysInfo.currentDir = curDir 
+		)
+		
+		fn getUnits = 
+		(	
+			u = trimLeft (units.SystemType as string) "#"
+			u[1] = toUpper u[1]
+			return u
+		)
+		
+		fn getViewpoints = (
+			cams = cameras as array	
+			return for i in cams collect i.name
 		)
 		
 		fn exportCubeMaps path: "" = (		
@@ -406,17 +517,21 @@ HELP =
 				
 				tmp = bitmap w h
 				
+				names = #()
+				
 				for i in 1 to 6 do
 				(
 					p = (w * i) - w
 
 					pasteBitmap b tmp (box2 p 0 w h) [0, 0]
-						
-					tmp.filename = d + i as string + ".jpg"
-					save tmp										
+					nn = 	n + "_" + i as string + ".jpg"
+					tmp.filename = d + nn
+					save tmp					
+
+					append names nn
 				)
 				
-				cubeMapsOptimize path: d
+				cubeMapsOptimize path: d names: names
 			)
 			
 			
@@ -462,11 +577,17 @@ HELP =
 			outZip = getSaveFileName caption: "Save Archive" types: "ZIP (*.zip)|*.zip"
 			if(outZip == undefined) do return false
 				
+			max file save	
+				
+			local json = jsonClass()
+			json.init()
+				
 			gid = genID()	
 			outPath = getFilenamePath outZip
 			outName = getFilenameFile outZip
 			outFullName = gid
 				
+			progressStart "Pack Scene..."	
 				
 			tmpZip = outPath + outFullName + @"\"
 			makeDir tmpZip
@@ -483,6 +604,8 @@ HELP =
 			originalFile = maxFilePath + maxFileName
 			
 			saveNodes nodes out quiet: true
+			
+			progressUpdate 30.0
 			
 			loadMaxFile out useFileUnits: true quiet: true
 				
@@ -504,6 +627,8 @@ HELP =
 					)										
 				)
 			)	
+			
+			progressUpdate 60.0
 				
 			tmrDetectDialog.active = true
 			
@@ -514,12 +639,29 @@ HELP =
 			
 			exportCubeMaps path: tmpZip
 			
+			progressUpdate 90.0
+			
+			-- Write json
+			json.put "initialView" (getInitalView())
+			json.put "sceneUnits" (getUnits())
+			json.put "sceneScale" (units.SystemScale)			
+			json.put "skybox" "beach"
+			json.put "map" "false"
+			json.put "showOrbitView" "true"
+			json.put "viewpoints" (getViewpoints())
+				
+			json.write (tmpZip + "index.json")
+			
 			zipper = zip()
 			zipper.packFiles source: tmpZip target: outPath name: outName del: true
+				
+			progressUpdate 100.0	
 			
 			resetMaxFile #noPrompt
 			loadMaxFile originalFile useFileUnits: true quiet: true
 			
+			progressEnd()	
+				
 			q = queryBox "Model packed success!\nDo you want to open containing folder?" title: "Success!"
 			if(q) do shellLaunch outPath ""	
 		)
