@@ -571,6 +571,9 @@ HELP =
 		)
 		
 		on btnExport pressed do (
+			
+			updateList cams: cameras
+			
 			if(maxFileName == "") do return messageBox "Please save scene first!" title: "Warning!"	
 			if(not isCubeMapsSelected()) do return messageBox "Please bind cubemaps for all cameras!" title: "Warning!"
 			
