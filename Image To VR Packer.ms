@@ -349,11 +349,19 @@ HELP =
 	)
 
 	rollout  R_IMGTOVR "" 
-	(		
+	(	
+		group "Name" (
+			edittext edtName "" height: 24
+		)		
 		group "Cameras /  Cube Maps:" (
 			listbox lbxCameras "" height: 10	
 			button btnUpdateList "Update List" across: 2 width: 130 height: 30
 			button btnLoadImageForCamera "Bind Cube Map" width: 130 height: 30
+		)
+		
+		group "Preview" (
+			edittext edtPreview "" height: 24 readOnly: true
+			button btnPreviewBrowse "Browse"
 		)
 		
 		group "Settings" (
@@ -499,6 +507,10 @@ HELP =
 			return for i in cams collect i.name
 		)
 		
+		fn exportPreview path: "" = (
+			copyFile (edtPreview.text) (path + "index.jpg")
+		)
+		
 		fn exportCubeMaps path: "" = (		
 			cams = cameras as array			
 			
@@ -537,6 +549,21 @@ HELP =
 			
 		)
 		
+		on edtName changed  v do (			
+			bad = #("\n", "\t", "\"", ":", "\\", "&", "^", "%", "'", "$", "#", "@", "!", "?", "*")
+			s = edtName.text
+			for i in bad do s = substituteString s i ""
+				
+			edtName.text = s
+		)
+		
+		on btnPreviewBrowse pressed do (
+			f = getOpenFileName  caption:"Browse" types:"JPG(*.jpg)|*.jpg"
+			if(f == undefined) do return false
+			
+			edtPreview.text = f			
+		)
+			
 		on tmrDetectDialog tick do (
 			postVRML_Settings()
 		)
@@ -573,8 +600,10 @@ HELP =
 		on btnExport pressed do (
 			
 			updateList cams: cameras
-			
+						
 			if(maxFileName == "") do return messageBox "Please save scene first!" title: "Warning!"	
+			if(edtName.text.count < 2) do return messageBox "Please enter correct project name!" title: "Warning!"	
+			if(not doesFileExist edtPreview.text) do return messageBox "Please select preview!" title: "Warning!"	
 			if(not isCubeMapsSelected()) do return messageBox "Please bind cubemaps for all cameras!" title: "Warning!"
 			
 			outZip = getSaveFileName caption: "Save Archive" types: "ZIP (*.zip)|*.zip"
@@ -641,10 +670,13 @@ HELP =
 			tmrDetectDialog.active = false
 			
 			exportCubeMaps path: tmpZip
+			exportPreview path: tmpZip
+			
 			
 			progressUpdate 90.0
 			
 			-- Write json
+			json.put "name" (edtName.text)
 			json.put "initialView" (getInitalView())
 			json.put "sceneUnits" (getUnits())
 			json.put "sceneScale" (units.SystemScale)			
@@ -652,6 +684,7 @@ HELP =
 			json.put "map" "false"
 			json.put "showOrbitView" "true"
 			json.put "viewpoints" (getViewpoints())
+			json.put "preview" "index.jpg"
 				
 			json.write (tmpZip + "index.json")
 			
