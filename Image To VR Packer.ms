@@ -396,8 +396,10 @@ HELP =
 			setUserProp c "cubemap" f
 		)
 			
-		fn getMiniMap get: #filename = (
-			p = $MiniMap_Plane
+		fn getMiniMap p get: #filename = (
+			--p = execute ("$'" + name + "'")
+			--p = getNodeByName name exact: true all: false
+				
 			if(p == undefined) do return undefined
 			if(p.material == undefined) do return undefined
 			if(p.material.diffuseMap == undefined) do return undefined
@@ -417,11 +419,7 @@ HELP =
 				c = cams[k]
 				n = k as string							
 				p = getProp c
-				
-				if(c.name == "MiniMap_Camera") do (															
-					continue
-				)
-				
+								
 				file = "Not Assigned"
 				if(p != undefined) do (					
 					
@@ -436,20 +434,6 @@ HELP =
 				cname = strip c.name
 				c.name = cname
 				out[k] = n + ". " + cname + " (" + file + ")"				
-			)
-			
-			minimapCamera = $MiniMap_Camera
-			if(minimapCamera != undefined) do (
-				n = (out.count + 1) as string
-				cname = minimapCamera.name
-				
-				f = getMiniMap get: #filename
-				if(f != undefined) do (
-					file = filenameFromPath f 
-					jj = n + ". " + cname + " (" + file + ")"		
-					append out jj
-					append imagesList f
-				)
 			)
 			
 			return out
@@ -478,12 +462,7 @@ HELP =
 			if(i == 0) do return messageBox "Please select camera from list!" title: "Error!"
 		
 			c = camerasList[i]
-			
-			if(c.name == "MiniMap_Camera") do (
-				btnCreateMiniMapPlane.pressed()
-				return false
-			)
-			
+						
 			f = getOpenFileName caption:"Choose Image" types:"JPG (*.jpg)|*.jpg"
 			if(f == undefined) do return false
 		
@@ -559,10 +538,24 @@ HELP =
 			copyFile (edtPreview.text) (path + "index.jpg")
 		)
 		
-		fn exportMiniMap path: "" = (
-			f = getMiniMap get: #filename
+		fn getMiniMaps = for i in objects where (matchPattern i.name pattern: "MiniMap_Plane*") and (getMiniMap i get: #filename) != undefined collect i
+		
+		fn exportMiniMap path: "" = (			
+			o = getMiniMaps()
+			out = #()
 			
-			copyFile (f) (path + "minimap.jpg")
+			for i in o do (
+				f = getMiniMap i get: #filename
+				
+				if(f == undefined) do continue
+				t = getFilenameType f
+				n = i.name + t
+				copyFile (f) (path + n)
+				
+				append out n
+			)		
+
+			return out
 		)
 		
 		fn exportCubeMaps path: "" = (		
@@ -601,32 +594,19 @@ HELP =
 			)
 		)
 		
-		on btnCreateMiniMapPlane pressed do (
-			
-			o = $MiniMap_Plane
-			
-			if(o != undefined) do (
-				q = queryBox "MiniMap Plane already exist!\nDo you want to continue?" title: "Confirm?"
-				if(not q) do return false											
-			)
-			
+		on btnCreateMiniMapPlane pressed do (			
+					
 			f = getOpenFileName  caption:"Browse" types:"JPG(*.jpg)|*.jpg"
 			if(f == undefined) do return false
 			
 			oldPos = [0,0,0]
 			oldScale = [1, 1, 1]
 			oldRotation = (quat 0 0 0 1)
-			
-			if(o != undefined) do (
-				oldPos = o.pos
-				oldScale = o.scale
-				oldRotation = o.rotation
-				try(delete o) catch()
-			)
-			
+						
 			if(f.count == 0 or f == "") do return messageBox "Please select Mini Map image!" title: "Error!"
 				
 			nn = "MiniMap_Plane"
+			nn = uniqueName nn numDigits: 3
 			
 			b = Bitmaptexture()	
 			b.name = nn
@@ -659,45 +639,8 @@ HELP =
 			
 			select p
 			max zoomext sel
-			
-			
-			-- Create camera
-			
-			f = getMiniMap get: #filename
-			b = getMiniMap get: #bitmap
-			o = getMiniMap get: #object
-			
-			if(f == undefined) do return messageBox "Please create MiniMap Plane first!" title: "Error!"			
-			
-			cc = $MiniMap_Camera
-			if(cc != undefined) do try(delete cc) catch()
-
-			nn = "MiniMap_Camera"
-			
-			c = Freecamera fov:45 name: nn
-			c.pos = o.pos
-			
-			d = o.max - o.min
-			d = #(d[1], d[2], d[3])
-			l = amax d
-			c.pos.z = c.pos.z + l
-			viewport.setCamera c
-			
-			select c
-			max zoomext sel
-			displaySafeFrames = true
-			
-			if(b != undefined) do (
-				renderWidth = b.width
-				renderHeight = b.height
-			)
-			
-			c.parent = o
-			setTransformLockFlags o #{4, 5}
-			
-			btnUpdateList.pressed()
-			
-			m = "Now move and scale the plane, so that the picture on the plane completely falls with your geometry."
+				
+			m = "Please scale and align your Mini Map to match the walls..."
 			messageBox m title: "Success!" beep: false
 		)
 		
@@ -715,14 +658,7 @@ HELP =
 			
 			edtPreview.text = f			
 		)
-		
-		on btnMiniMapBrowse pressed do (
-			f = getOpenFileName  caption:"Browse" types:"JPG(*.jpg)|*.jpg"
-			if(f == undefined) do return false
-			
-			edtMiniMap.text = f			
-		)
-			
+					
 		on tmrDetectDialog tick do (
 			postVRML_Settings()
 		)
@@ -760,14 +696,7 @@ HELP =
 			i = ddlInitialView.selection 
 			if(i == 0) do return false			
 			c = camerasList[i]
-			if(c == undefined) do return false
-			
-			if(c.name == "MiniMap_Camera") do (
-				if(ddlInitialView.items.count > 1) do (
-					ddlInitialView.selection = 1
-				)
-				return messageBox "You can't select MiniMap camera!" title: "Error!"
-			)
+			if(c == undefined) do return false			
 		)
 		
 		on btnExport pressed do (
@@ -778,17 +707,6 @@ HELP =
 			if(edtName.text.count < 2) do return messageBox "Please enter correct project name!" title: "Warning!"	
 			if(not doesFileExist edtPreview.text) do return messageBox "Please select preview!" title: "Warning!"	
 			if(not isCubeMapsSelected()) do return messageBox "Please bind cubemaps for all cameras!" title: "Warning!"
-				
-			minimapObject = getMiniMap get: #object	
-			minimapFile = getMiniMap get: #filename	
-			minimapBitmap = getMiniMap get: #bitmap	
-			minimapCamera = $MiniMap_Camera
-					
-				
-			if(minimapCamera != undefined) do (
-				if(minimapObject == undefined) do return messageBox "Can't find MiniMap plane!" title: "Warning!"
-				if(minimapFile == undefined) do return messageBox "Can't find MiniMap file!" title: "Warning!"
-			)
 			
 			outZip = getSaveFileName caption: "Save Archive" types: "ZIP (*.zip)|*.zip"
 			if(outZip == undefined) do return false
@@ -808,7 +726,7 @@ HELP =
 			tmpZip = outPath + outFullName + @"\"
 			makeDir tmpZip
 			
-			if(minimapFile != undefined) do exportMiniMap path: tmpZip
+			exportedMiniMaps = exportMiniMap path: tmpZip
 				
 			index = (tmpZip + "index.wrl")
 			
@@ -870,12 +788,10 @@ HELP =
 			json.put "showOrbitView" "true"
 			json.put "viewpoints" (getViewpoints())
 			json.put "preview" "index.jpg"
-				
-			if(minimapFile != undefined and minimapCamera != undefined and minimapCamera != undefined) do (
+			
+			if(exportedMiniMaps.count) do (
 				json.put "minimap" "true"
-				json.put "minimapFile" "minimap.jpg"
-				json.put "minimapWidth" (minimapBitmap.width as string)
-				json.put "minimapHeight" (minimapBitmap.height as string)
+				json.put "minimapFiles" exportedMiniMaps				
 			)
 				
 			json.write (tmpZip + "index.json")
