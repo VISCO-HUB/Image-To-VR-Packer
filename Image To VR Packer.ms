@@ -354,9 +354,9 @@ HELP =
 
 	rollout  R_IMGTOVR "" 
 	(	
-		group "Name" (
+		/*group "Name" (
 			edittext edtName "" height: 24
-		)		
+		)		*/
 		group "Cameras /  Cube Maps:" (
 			listbox lbxCameras "" height: 10	
 			button btnUpdateList "Update List" across: 2 width: 130 height: 30
@@ -369,7 +369,7 @@ HELP =
 		)
 		
 		group "Mini Map" (		
-			button btnCreateMiniMapPlane "Create Mini Map Plane & Camera  " width: 180 height: 30
+			button btnCreateMiniMapPlane "Create Mini Map Plane" width: 180 height: 30
 		)
 		
 		group "Settings" (
@@ -377,10 +377,11 @@ HELP =
 			dropdownlist ddlInitialView ""
 			checkbox cbxExportSelected "Export selected only"
 			checkbox cbxRemoveMaterialsAndUVW "Clean Materials and UVW" checked: true
-			spinner spnCubeMapsQuality "Cube Maps quality: " range: [30, 95, 65] type: #integer fieldWidth: 70 align: #left
+			--spinner spnCubeMapsQuality "Cube Maps quality: " range: [30, 95, 65] type: #integer fieldWidth: 70 align: #left
 		)
 		
-		button btnExport "Export" height: 40 width: 270
+		button btnQuickExport "Quick Export VRML" width: 270 offset: [0, 10]
+		button btnExport "Export All" height: 40 width: 270 offset: [0, 10]
 		
 		timer tmrDetectDialog active: false interval: 25
 		
@@ -395,21 +396,56 @@ HELP =
 		fn setProp c f = (
 			setUserProp c "cubemap" f
 		)
-			
-		fn getMiniMap p get: #filename = (
+		
+		fn delAllProps = (
+			for i in cameras do setUserProp  i "cubemap" ""
+		)
+		
+		fn replaceCamerasToFree = (
+			o = cameras as array
+			cams = for c in cameras collect #(c.pos, c.name, getUserPropBuffer c)
+			try(delete o) catch()
+
+			f = freeCamera()
+			f.rotation = (eulerAngles -90 0 0) as quat
+
+			for p in cams do (
+				c = copy f
+				c.pos = p[1]
+				c.name = p[2]
+				setUserPropBuffer c p[3]
+				c.wirecolor = random white black
+			)
+			try(delete f) catch()
+		)
+				
+		fn getMiniMap p get: #diffuse = (
 			--p = execute ("$'" + name + "'")
 			--p = getNodeByName name exact: true all: false
 				
 			if(p == undefined) do return undefined
 			if(p.material == undefined) do return undefined
 			if(p.material.diffuseMap == undefined) do return undefined
-			f = p.material.diffuseMap.filename			
+			f = p.material.diffuseMap.filename	
+			if(get == #opacity) do (
+				f = undefined
+				if(p.material.opacityMap != undefined) do f = p.material.opacityMap.filename
+			)
+			
+			opacityBitmap = undefined
+			if(get == #opacityBitmap) do (
+				if(p.material.opacityMap != undefined) do opacityBitmap = p.material.opacityMap.bitmap
+			)
+			
 			if(f == undefined or not doesFileExist f) do return undefined
-						
+					
+			
 			case get of (
 				#object: return p
-				#bitmap: p.material.diffuseMap.bitmap
-				default: return f	
+				#diffuseBitmap: p.material.diffuseMap.bitmap
+				#opacity: f
+				#opacityBitmap: opacityBitmap
+				default: return f					
 			)			
 		)
 		
@@ -457,22 +493,119 @@ HELP =
 			return c.name
 		)
 				
+		fn bindCubeMapToCamera f i = (			
+			b = openBitMap f
+			a = b.width / b.height
+			
+			if(a != 6) do return false
+			c = camerasList[i]
+			
+			setProp c f
+			
+			return true
+		)
+		
+		fn convertPNGtoJPG2 f = (
+			p = getFilenamePath f
+			n = getFilenameFile f
+			ext = getFilenameType f
+			nn = p + n + ".jpg"
+			
+			b = openBitMap f	
+			bb = copy b
+			close b
+			bb.filename = nn	
+			save bb
+			close bb
+		)
+		
+		fn convertPNGtoJPG f = (	
+			p = getFilenamePath f
+			n = getFilenameFile f
+			ext = getFilenameType f
+			
+			selfPath = getFileNamePath (getThisScriptFileName())				
+			exe = "\"" + selfPath + "convert.exe\""
+				
+			curDir = sysInfo.currentDir
+			sysInfo.currentDir = selfPath
+			
+			nn = p + n + ".jpg"
+				
+			cmd = exe + " -quality 100 -flatten  \"" + f + "\" \"" + nn + "\""							
+			hiddenDosCommand cmd exitcode:&exitcode						
+				
+			sysInfo.currentDir = curDir 		
+		)
+		
+		fn convertToDDS f = (	
+			p = getFilenamePath f
+			n = getFilenameFile f
+			ext = getFilenameType f
+			
+			selfPath = getFileNamePath (getThisScriptFileName())				
+			exe = "convert.exe"
+				
+			curDir = sysInfo.currentDir
+			sysInfo.currentDir = selfPath
+			
+			nn = p + n + ".dds"
+				
+			cmd = exe + "  -format dds -define dds:mipmaps=1 -define dds:compression=dxt1  \"" + f + "\" \"" + nn + "\""							
+			print cmd
+			hiddenDosCommand cmd exitcode:&exitcode startpath: selfPath		
+				
+			sysInfo.currentDir = curDir 		
+		)
+		
+		fn resizeCubeMap f size: 1024 quality: 99 postfix: "_low" = (
+			p = getFileNamePath f
+			t = getFileNameType f
+			n = getFilenameFile f
+			
+			size = size as string + "x" + size as string
+			
+			selfPath = getFileNamePath (getThisScriptFileName())				
+			exe = "convert.exe"
+			curDir = sysInfo.currentDir
+			sysInfo.currentDir = selfPath
+			
+			nn = p + n + postfix + t
+				
+			cmd = exe + " -quality " + (quality as string) + " -resize " + size + " \"" + f + "\" \"" + nn + "\""									
+			hiddenDosCommand cmd exitcode:&exitcode	
+
+			sysInfo.currentDir = curDir 
+		)
+		
 		fn openCubeMap = (					
 			i = lbxCameras.selection 
 			if(i == 0) do return messageBox "Please select camera from list!" title: "Error!"
-		
-			c = camerasList[i]
-						
+			
 			f = getOpenFileName caption:"Choose Image" types:"JPG (*.jpg)|*.jpg"
 			if(f == undefined) do return false
-		
-			b = openBitMap f
-			a = b.width / b.height
-		
-			if(a != 6) do return messageBox "CubeMap must have aspect ratio 6:1 !" title: "Error!"
-					
-			setProp c f
-
+						
+			n = trimRight (getFileNameFile f) "_01234567890"
+			p = (getFilenamePath f) 
+			files = for i in getFiles (p + n + "*.jpg") where not matchPattern i pattern: ("*" + n +"*alpha*") collect i
+				
+			q = false
+			if(files.count > 0 and (files.count == camerasList.count)) do (
+				q = queryBox ("We found " + files.count as string +  " files in this folder.\nDo you want to bind them all to cameras?") title: "Confirm?"
+			)
+			
+			r = true
+			if(not q) then (
+				r = bindCubeMapToCamera f i				
+			) else (
+				for ii in 1 to files.count do (
+					t = bindCubeMapToCamera files[ii] ii
+					if(not t) do r = false
+				)
+			)
+			
+			if(not r) do return messageBox "CubeMap must have aspect ratio 6:1 !" title: "Error!"
+						
 			lbxCameras.items = updateList cams: camerasList
 			ddlInitialView.items = lbxCameras.items
 		)
@@ -504,6 +637,7 @@ HELP =
 			return code
 		)
 		
+		--- !!! TO REMOVE THIS FUNC
 		fn cubeMapsOptimize path: "" names: #() = (
 			selfPath = getFileNamePath (getThisScriptFileName())
 			jpgoptim = "\"" + selfPath + "jpegoptim.exe\""
@@ -522,6 +656,7 @@ HELP =
 			sysInfo.currentDir = curDir 
 		)
 		
+		
 		fn getUnits = 
 		(	
 			u = trimLeft (units.SystemType as string) "#"
@@ -538,24 +673,98 @@ HELP =
 			copyFile (edtPreview.text) (path + "index.jpg")
 		)
 		
-		fn getMiniMaps = for i in objects where (matchPattern i.name pattern: "MiniMap_Plane*") and (getMiniMap i get: #filename) != undefined collect i
-		
+		fn getMiniMaps = for i in objects where (matchPattern i.name pattern: "MiniMap_Plane*") and (getMiniMap i get: #diffuse) != undefined collect i
+			
 		fn exportMiniMap path: "" = (			
 			o = getMiniMaps()
-			out = #()
+			out1 = #()
+			out2 = #()
+			out3 = #()
 			
 			for i in o do (
-				f = getMiniMap i get: #filename
+				f = getMiniMap i get: #diffuse
+				b = getMiniMap i get: #diffuseBitmap
+				
+				opacity = getMiniMap i get: #opacity
+				opacityBitmap = getMiniMap i get: #opacityBitmap
 				
 				if(f == undefined) do continue
 				t = getFilenameType f
 				n = i.name + t
 				copyFile (f) (path + n)
+				s = ([b.width, b.height]) as string
 				
-				append out n
+				opacityName = undefined
+				if(opacity != undefined) do (
+					opacityName = i.name + "_alpha" + t
+					copyFile (opacity) (path + opacityName)					
+				)
+				
+				append out1 n
+				append out2 s
+				append out3 opacityName
 			)		
 
-			return out
+			return #(out1, out2, out3)
+		)
+		
+		fn sliceCubeMap filename dir name parts: 6 resize: -1 postfix: "_low"= (
+			b = openBitmap filename
+			w = b.width / parts
+			h = b.height
+			
+			tmp = bitmap w h
+			
+			for i in 1 to parts do
+			(
+				p = (w * i) - w
+
+				pasteBitmap b tmp (box2 p 0 w h) [0, 0]
+				nn = 	name + "_" + i as string
+				t = getFileNameType filename
+				tmp.filename = dir + nn + t
+				save tmp					
+
+				--resizeCubeMap (tmp.filename) size: 1024 postfix: ""
+				--convertToDDS (tmp.filename)
+				if(resize != -1) do resizeCubeMap (tmp.filename) size: resize postfix: postfix				
+			)
+		)
+		
+		fn exportCubeMapsAlpha path: "" = (		
+			cams = cameras as array		
+
+			textures = #()
+			
+			for i in 1 to cams.count do (
+				n = cams[i].name
+				filename = getProp cams[i]
+				nn = trimRight (getFileNameFile filename) "01234567890"
+				nums = trimLeft (getFileNameFile filename) nn
+					
+				pp = getFileNamePath filename
+				ee = getFileNameType filename
+				
+				files = getFiles(pp + nn + "*alpha*" + nums + ee)
+				if(files.count == 0) do getFiles(pp + nn + nums +"*alpha*" +  ee)
+								
+				if(files.count != 1) do return false
+				if(files[1] == undefined or not doesFileExist files[1]) do return false
+				
+				append textures #(files[1],  n)
+			)	
+			
+			for i in 1 to textures.count do (												
+				n = textures[i][2]
+				filename = textures[i][1]
+				d = path + n + @"\"
+							
+				makeDir d
+					
+				sliceCubeMap filename d (n + "_alpha") resize: 512 postfix: ""
+			)	
+
+			return true
 		)
 		
 		fn exportCubeMaps path: "" = (		
@@ -565,11 +774,13 @@ HELP =
 				n = cams[i].name
 				filename = getProp cams[i]
 				d = path + n + @"\"
-				
-				if(filename == undefined or not doesFileExist filename) do continue
-				
-				makeDir d
 								
+				if(filename == undefined or not doesFileExist filename) do continue
+								
+				makeDir d
+				sliceCubeMap filename d n resize: 1000
+				
+				/*	
 				b = openBitmap filename
 				w = b.width / 6
 				h = b.height
@@ -577,26 +788,47 @@ HELP =
 				tmp = bitmap w h
 				
 				names = #()
+				low = #()
 				
 				for i in 1 to 6 do
 				(
 					p = (w * i) - w
 
 					pasteBitmap b tmp (box2 p 0 w h) [0, 0]
-					nn = 	n + "_" + i as string + ".jpg"
-					tmp.filename = d + nn
+					nn = 	n + "_" + i as string
+					t = ".jpg"
+					tmp.filename = d + nn + t
 					save tmp					
 
+					resizeCubeMap (tmp.filename) size: 1000
+					
 					append names nn
+					append low (d + nn + "_low" + t)
 				)
-				
-				cubeMapsOptimize path: d names: names
+				*/
+				-- !!!!!!!!!!!!
+				--cubeMapsOptimize path: d names: names
+				--cubeMapsOptimize path: d names: low				
 			)
+		)
+		
+		fn detectWrongCameras = (
+			w = for c in cameras where classOf c != Freecamera collect c
+				
+			if(w.count == 0) do return false
+			
+			q = queryBox "In scene found wrong format cameras!\nDo you want to replace them to \"Free\" cameras?\n\nCameras different than \"Free\" will not be exported!" title: "Confirm?"
+			if(not q) do return false
+			
+			replaceCamerasToFree()
+			
+			camerasList = getCameraList()
+			updateList cams: camerasList			
 		)
 		
 		on btnCreateMiniMapPlane pressed do (			
 					
-			f = getOpenFileName  caption:"Browse" types:"JPG(*.jpg)|*.jpg"
+			f = getOpenFileName  caption:"Browse" types:"JPG(*.jpg)|*.jpg|PNG(*.png)|*.png"
 			if(f == undefined) do return false
 			
 			oldPos = [0,0,0]
@@ -608,14 +840,31 @@ HELP =
 			nn = "MiniMap_Plane"
 			nn = uniqueName nn numDigits: 3
 			
+			fname = getFileNameFile f
+			fpath = getFileNamePath f
+			fext = getFileNameType f
+			
+			alphaTex = undefined
+			alphaTextures = getFiles(fpath + fname + "*alpha*" + fext)
+			if(alphaTextures.count == 1) do alphaTex = alphaTextures[1]
+			
+			
 			b = Bitmaptexture()	
 			b.name = nn
 			b.filename = f
+			
+			a = undefined
+			if(alphaTex != undefined) do (
+				a = Bitmaptexture()
+				a.name = nn + "_Alpha"
+				a.filename = alphaTex
+			)
 			
 			m = Standardmaterial()
 			m.name = nn
 			m.opacity = 60
 			m.diffuseMap = b
+			m.opacityMap = a
 			
 			m.showInViewport = on
 				
@@ -644,13 +893,13 @@ HELP =
 			messageBox m title: "Success!" beep: false
 		)
 		
-		on edtName changed  v do (			
+		/*on edtName changed  v do (			
 			bad = #("\n", "\t", "\"", ":", "\\", "&", "^", "%", "'", "$", "#", "@", "!", "?", "*")
 			s = edtName.text
 			for i in bad do s = substituteString s i ""
 				
 			edtName.text = s
-		)
+		)*/
 		
 		on btnPreviewBrowse pressed do (
 			f = getOpenFileName  caption:"Browse" types:"JPG(*.jpg)|*.jpg"
@@ -684,12 +933,22 @@ HELP =
 		)
 			
 		on R_IMGTOVR open do (
+			
+			err = units.SystemType != #meters
+			if(err) do (
+				messageBox "Please convert your scene in to system units Meters for export and try again!" title: "Warning"
+				try(closeRolloutFloater F_IMGTOVR) catch()
+				return false
+			)
+			
 			imagesList = #()
 			camerasList = getCameraList()
 			--for i in 1 to camerasList.count do append imagesList undefined
 			
 			lbxCameras.items = updateList cams: camerasList
 			ddlInitialView.items = lbxCameras.items
+			
+			detectWrongCameras()						
 		)
 		
 		on ddlInitialView selected v do (
@@ -699,12 +958,49 @@ HELP =
 			if(c == undefined) do return false			
 		)
 		
+		fn exportVRML file: "" = (
+			-- For all scene
+			for i in objects where not (matchPattern i.name pattern: "MiniMap_Plane*") do (
+				if(canConvertTo i Editable_Mesh) do (
+					-- Convert to mesh
+					try(convertToMesh i) catch()					
+					if(isValidNode i and classOf i == Editable_Mesh) do (
+						--Clean mapping and UVW
+						if(cbxRemoveMaterialsAndUVW.checked) do (
+							try(i.material = undefined)catch()				
+							clearMapping i
+						)
+						
+						--Remove smoothgroups
+						meshop.autosmooth i i.faces 0
+						update i
+					)										
+				)
+			)	
+			
+			tmrDetectDialog.active = true
+			
+			deleteFile file
+			exportFile file classes: VRBL_Export
+			
+			tmrDetectDialog.active = false
+		)
+		
+		on btnQuickExport pressed do (
+			index = getSaveFileName caption: "Save Archive" types: "WRL (*.wrl)|*.wrl" filename: "index.wrl"
+			if(index == undefined) do return false
+			
+			exportVRML file: index
+			
+			messageBox "VRML Export Done." title: "Done!" beep: false
+		)
+				
 		on btnExport pressed do (
 			
 			updateList cams: cameras
 						
 			if(maxFileName == "") do return messageBox "Please save scene first!" title: "Warning!"	
-			if(edtName.text.count < 2) do return messageBox "Please enter correct project name!" title: "Warning!"	
+			--if(edtName.text.count < 2) do return messageBox "Please enter correct project name!" title: "Warning!"	
 			if(not doesFileExist edtPreview.text) do return messageBox "Please select preview!" title: "Warning!"	
 			if(not isCubeMapsSelected()) do return messageBox "Please bind cubemaps for all cameras!" title: "Warning!"
 			
@@ -744,42 +1040,20 @@ HELP =
 			progressUpdate 30.0
 			
 			loadMaxFile out useFileUnits: true quiet: true
-				
-			-- For all scene
-			for i in objects do (
-				if(canConvertTo i Editable_Mesh) do (
-					-- Convert to mesh
-					try(convertToMesh i) catch()					
-					if(isValidNode i and classOf i == Editable_Mesh) do (
-						--Clean mapping and UVW
-						if(cbxRemoveMaterialsAndUVW.checked) do (
-							try(i.material = undefined)catch()				
-							clearMapping i
-						)
-						
-						--Remove smoothgroups
-						meshop.autosmooth i i.faces 0
-						update i
-					)										
-				)
-			)	
-			
+							
 			progressUpdate 60.0
 				
-			tmrDetectDialog.active = true
+			exportVRML file: index
 			
-			deleteFile index
-			exportFile index classes: VRBL_Export
-			
-			tmrDetectDialog.active = false
-			
-			exportCubeMaps path: tmpZip
+			exportCubeMaps path: tmpZip			
 			exportPreview path: tmpZip
+			
+			isAlpha = exportCubeMapsAlpha path: tmpZip
 									
 			progressUpdate 90.0
 			
 			-- Write json
-			json.put "name" (edtName.text)
+			--json.put "name" (edtName.text)
 			json.put "initialView" (getInitalView())
 			json.put "sceneUnits" (getUnits())
 			json.put "sceneScale" (units.SystemScale)			
@@ -788,10 +1062,13 @@ HELP =
 			json.put "showOrbitView" "true"
 			json.put "viewpoints" (getViewpoints())
 			json.put "preview" "index.jpg"
+			json.put "viewpointsAlpha" (isAlpha as string)
 			
-			if(exportedMiniMaps.count) do (
+			if(exportedMiniMaps[1].count) do (
 				json.put "minimap" "true"
-				json.put "minimapFiles" exportedMiniMaps				
+				json.put "minimapFiles" exportedMiniMaps[1]								
+				json.put "minimapRes" exportedMiniMaps[2]
+				json.put "minimapAlpha" exportedMiniMaps[3]
 			)
 				
 			json.write (tmpZip + "index.json")
